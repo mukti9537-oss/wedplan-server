@@ -26,7 +26,7 @@ const database = connectedClient.db('wedplan');
 const users = database.collection("user");
 
 app.get('/', (req, res) => {
-    res.send('wedding planning website');
+    res.send('wedplan webpage');
 });
 
 app.get('/users', async(req, res)=> {
