@@ -39,6 +39,11 @@ app.get('/users', async(req, res)=> {
     const result = await cursor.toArray();
     res.send(result);
 })
+app.get('/add-service', async(req, res)=> {
+    const cursor = services.find();
+    const result = await cursor.toArray();
+    res.send(result);
+})
 
 app.post('/add-service', upload.single('serviceImage'), async (req, res) => {
     try {
