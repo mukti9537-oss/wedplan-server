@@ -83,7 +83,9 @@ app.post('/add-service', upload.single('serviceImage'), async (req, res) => {
             category,
             description,
             price,
-            location
+            location,
+            vendorName,
+            vendorEmail
         } = req.body;
 
         // Check image
@@ -127,6 +129,8 @@ app.post('/add-service', upload.single('serviceImage'), async (req, res) => {
             price: Number(price),
             location,
             serviceImage: imageUrl,
+            vendorName,
+            vendorEmail,
             createdAt: new Date()
         };
 
@@ -149,6 +153,7 @@ app.post('/add-service', upload.single('serviceImage'), async (req, res) => {
         });
     }
 });
+
 app.delete('/add-service/:id', async (req, res) => {
     const _id = req.params.id;
     const query = { _id: new ObjectId(_id) };
