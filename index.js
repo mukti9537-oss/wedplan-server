@@ -34,16 +34,47 @@ app.get('/', (req, res) => {
     res.send('wedplan webpage');
 });
 
-app.get('/users', async(req, res)=> {
+app.get('/users', async (req, res) => {
     const cursor = users.find({});
     const result = await cursor.toArray();
     res.send(result);
 })
-app.get('/add-service', async(req, res)=> {
-    const cursor = services.find();
-    const result = await cursor.toArray();
+
+app.get('/add-service', async (req, res) => {
+
+    const { search, category, location } = req.query;
+
+    const query = {};
+
+    // Search by service name
+    if (search) {
+        query.serviceName = {
+            $regex: search,
+            $options: 'i'
+        };
+    }
+
+    // Filter by category
+    if (category) {
+        query.category = {
+            $regex: category,
+            $options: 'i'
+        };
+    }
+
+    // Filter by location
+    if (location) {
+        query.location = {
+            $regex: location,
+            $options: 'i'
+        };
+    }
+
+    const result = await services.find(query).toArray();
+
     res.send(result);
-})
+});
+
 
 app.post('/add-service', upload.single('serviceImage'), async (req, res) => {
     try {
@@ -118,9 +149,9 @@ app.post('/add-service', upload.single('serviceImage'), async (req, res) => {
         });
     }
 });
-app.delete('/add-service/:id', async (req, res)=> {
+app.delete('/add-service/:id', async (req, res) => {
     const _id = req.params.id;
-    const query = {_id: new ObjectId(_id)};
+    const query = { _id: new ObjectId(_id) };
     const result = await services.deleteOne(query);
     res.send(result)
 })
