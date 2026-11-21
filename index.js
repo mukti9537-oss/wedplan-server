@@ -118,7 +118,12 @@ app.post('/add-service', upload.single('serviceImage'), async (req, res) => {
         });
     }
 });
-
+app.delete('/add-service/:id', async (req, res)=> {
+    const _id = req.params.id;
+    const query = {_id: new ObjectId(_id)};
+    const result = await services.deleteOne(query);
+    res.send(result)
+})
 
 app.listen(port, () => {
     console.log(`server is running on port ${port}`);
