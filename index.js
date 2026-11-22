@@ -7,12 +7,9 @@ import multer from 'multer';
 const app = express();
 const port = process.env.PORT || 8000;
 
-//middleware
 app.use(express.json());
 app.use(cors());
-const upload = multer({
-    storage: multer.memoryStorage()
-});
+const upload = multer({ storage: multer.memoryStorage() });
 
 const client = new MongoClient(`mongodb://${process.env.DB_USER}:${process.env.DB_PASSWORD}@ac-sed4pgj-shard-00-00.la1zoji.mongodb.net:27017,ac-sed4pgj-shard-00-01.la1zoji.mongodb.net:27017,ac-sed4pgj-shard-00-02.la1zoji.mongodb.net:27017/?ssl=true&replicaSet=atlas-sjdwaf-shard-0&authSource=admin`);
 
@@ -42,78 +39,36 @@ app.get('/users', async (req, res) => {
 })
 
 app.get('/add-service', async (req, res) => {
-
     const { search, category, location } = req.query;
-
     const query = {};
-
-    // Search by service name
     if (search) {
-        query.serviceName = {
-            $regex: search,
-            $options: 'i'
-        };
+        query.serviceName = { $regex: search, $options: 'i' };
     }
-
-    // Filter by category
     if (category) {
-        query.category = {
-            $regex: category,
-            $options: 'i'
-        };
+        query.category = { $regex: category, $options: 'i' };
     }
-
-    // Filter by location
     if (location) {
-        query.location = {
-            $regex: location,
-            $options: 'i'
-        };
+        query.location = { $regex: location, $options: 'i' };
     }
-
     const result = await services.find(query).toArray();
-
     res.send(result);
 });
 
-
 app.post('/add-service', upload.single('serviceImage'), async (req, res) => {
     try {
-        const {
-            serviceName,
-            category,
-            description,
-            price,
-            location,
-            vendorName,
-            vendorEmail
-        } = req.body;
+        const { serviceName, category, description, price, location, vendorName, vendorEmail } = req.body;
 
-        // Check image
         if (!req.file) {
-            return res.status(400).send({
-                success: false,
-                message: "Service image is required"
-            });
+            return res.status(400).send({ success: false, message: "Service image is required" });
         }
 
-        // Upload image to ImgBB
         const formData = new FormData();
-
-        const imageBlob = new Blob([req.file.buffer], {
-            type: req.file.mimetype
-        });
-
+        const imageBlob = new Blob([req.file.buffer], { type: req.file.mimetype });
         formData.append('image', imageBlob, req.file.originalname);
 
-        const imgbbResponse = await fetch(
-            `https://api.imgbb.com/1/upload?key=${process.env.NEXT_PUBLIC_IMGBB_API_KEY}`,
-            {
-                method: 'POST',
-                body: formData
-            }
-        );
-
+        const imgbbResponse = await fetch(`https://api.imgbb.com/1/upload?key=${process.env.NEXT_PUBLIC_IMGBB_API_KEY}`, {
+            method: 'POST', body: formData
+        });
         const imageResult = await imgbbResponse.json();
 
         if (!imageResult.success) {
@@ -122,7 +77,6 @@ app.post('/add-service', upload.single('serviceImage'), async (req, res) => {
 
         const imageUrl = imageResult.data.url;
 
-        // Service data
         const serviceData = {
             serviceName,
             category,
@@ -132,26 +86,16 @@ app.post('/add-service', upload.single('serviceImage'), async (req, res) => {
             serviceImage: imageUrl,
             vendorName,
             vendorEmail,
+            isAvailable: true,
+            status: "Pending",   // <-- DEFAULT TO PENDING for admin approval
             createdAt: new Date()
         };
 
-        // Save to MongoDB
         const result = await services.insertOne(serviceData);
-
-        res.status(201).send({
-            success: true,
-            message: "Service added successfully",
-            insertedId: result.insertedId
-        });
-
+        res.status(201).send({ success: true, message: "Service added successfully", insertedId: result.insertedId });
     } catch (error) {
         console.error("Add Service Error:", error);
-
-        res.status(500).send({
-            success: false,
-            message: "Failed to add service",
-            error: error.message
-        });
+        res.status(500).send({ success: false, message: "Failed to add service", error: error.message });
     }
 });
 
@@ -161,48 +105,99 @@ app.delete('/add-service/:id', async (req, res) => {
     const result = await services.deleteOne(query);
     res.send(result)
 })
-//booking related api
+
+app.patch('/add-service/:id', async (req, res) => {
+    try {
+        const _id = req.params.id;
+        const { isAvailable } = req.body;
+        const query = { _id: new ObjectId(_id) };
+        const update = { $set: { isAvailable: isAvailable === true } };
+        const result = await services.updateOne(query, update);
+
+        if (result.matchedCount === 0) {
+            return res.status(404).send({ success: false, message: "Service not found" });
+        }
+
+        res.send({ success: true, message: "Service availability updated", modifiedCount: result.modifiedCount });
+    } catch (error) {
+        console.error("Update Service Availability Error:", error);
+        res.status(500).send({ success: false, message: "Failed to update service availability" });
+    }
+});
 
 app.get('/bookingsrequest', async (req, res) => {
     const cursor = bookingsrequest.find({});
     const result = await cursor.toArray();
     res.send(result);
 })
+app.get('/bookingsrequest/count', async (req, res) => {
+    const query = {};
+    if(req.query.bookingId) {
+    const result = await bookingsrequest.countDocuments(query);
+    res.send({count: result});
+    }
+  
+})
 
 app.post('/bookingsrequest', async (req, res) => {
-    const bookingsrequests = {
-        ...req.body,
-        status: req.body.status || "Pending",
-        requestDate: req.body.requestDate || new Date(),
-    };
+    const bookingsrequests = { ...req.body, status: req.body.status || "Pending", requestDate: req.body.requestDate || new Date() };
     console.log(bookingsrequests);
-
     const result = await bookingsrequest.insertOne(bookingsrequests);
     res.send(result)
 });
-
-// Get all bookings for a specific customer (enriched with service details)
-app.get('/my-bookings/:customerEmail', async (req, res) => {
+app.get('/vendor-bookings/:vendorEmail', async (req, res) => {
     try {
-        const { customerEmail } = req.params;
+        const { vendorEmail } = req.params;
 
-        const bookings = await bookingsrequest
-            .find({ email: customerEmail })
+        const requests = await bookingsrequest
+            .find({})
             .sort({ requestDate: -1 })
             .toArray();
 
-        // Enrich each booking with service details from the services collection
+        const vendorBookings = [];
+
+        for (const booking of requests) {
+            if (!ObjectId.isValid(booking.bookingId)) continue;
+
+            const service = await services.findOne({
+                _id: new ObjectId(booking.bookingId),
+                vendorEmail: vendorEmail
+            });
+
+            if (!service) continue;
+
+            vendorBookings.push({
+                ...booking,
+                customerName: booking.customerName || "Customer",
+                serviceName: service.serviceName,
+                serviceImage: service.serviceImage,
+                vendorName: service.vendorName,
+                eventDate: booking.BookingDate,
+                eventLocation: booking.BookingLocation,
+                status: booking.status || "Pending"
+            });
+        }
+
+        res.send(vendorBookings);
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Failed to fetch bookings" });
+    }
+});
+
+app.get('/my-bookings/:customerEmail', async (req, res) => {
+    try {
+        const { customerEmail } = req.params;
+        const bookings = await bookingsrequest.find({ email: customerEmail }).sort({ requestDate: -1 }).toArray();
         const enriched = await Promise.all(bookings.map(async (booking) => {
             let serviceName = booking.serviceName || "Unknown Service";
             let serviceImage = booking.serviceImage || "";
             let vendorName = booking.vendorName || "Unknown Vendor";
             let vendorEmail = booking.vendorEmail || "";
-
             try {
                 if (booking.bookingId) {
-                    const service = await services.findOne({
-                        _id: new ObjectId(booking.bookingId),
-                    });
+                    const service = await services.findOne({ _id: new ObjectId(booking.bookingId) });
                     if (service) {
                         serviceName = service.serviceName || serviceName;
                         serviceImage = service.serviceImage || serviceImage;
@@ -210,91 +205,135 @@ app.get('/my-bookings/:customerEmail', async (req, res) => {
                         vendorEmail = service.vendorEmail || vendorEmail;
                     }
                 }
-            } catch (err) {
-                // Invalid ObjectId — keep existing values
-            }
-
-            return {
-                ...booking,
-                serviceName,
-                serviceImage,
-                vendorName,
-                vendorEmail,
-                status: booking.status || "Pending",
-                requestDate: booking.requestDate || new Date(),
-                eventDate: booking.BookingDate || booking.eventDate || "",
-                eventLocation: booking.BookingLocation || booking.eventLocation || "",
-            };
+            } catch (err) { /* Invalid ObjectId */ }
+            return { ...booking, serviceName, serviceImage, vendorName, vendorEmail, status: booking.status || "Pending", requestDate: booking.requestDate || new Date(), eventDate: booking.BookingDate || booking.eventDate || "", eventLocation: booking.BookingLocation || booking.eventLocation || "" };
         }));
-
         res.send(enriched);
     } catch (error) {
         console.error("Fetch My Bookings Error:", error);
-        res.status(500).send({
-            success: false,
-            message: "Failed to load bookings",
-        });
+        res.status(500).send({ success: false, message: "Failed to load bookings" });
     }
 });
 
-// Cancel a booking (customer can only cancel their own pending bookings)
 app.patch('/booking/:id/cancel', async (req, res) => {
     try {
         const { id } = req.params;
         const { customerEmail } = req.body;
-
         if (!customerEmail) {
-            return res.status(400).send({
-                success: false,
-                message: "Customer email is required",
-            });
+            return res.status(400).send({ success: false, message: "Customer email is required" });
         }
-
-        const booking = await bookingsrequest.findOne({
-            _id: new ObjectId(id),
-        });
-
+        const booking = await bookingsrequest.findOne({ _id: new ObjectId(id) });
         if (!booking) {
-            return res.status(404).send({
-                success: false,
-                message: "Booking not found",
-            });
+            return res.status(404).send({ success: false, message: "Booking not found" });
         }
-
-        // Rule: Customers cannot cancel another customer's bookings
         if (booking.email !== customerEmail) {
-            return res.status(403).send({
-                success: false,
-                message: "Not authorized to cancel this booking",
-            });
+            return res.status(403).send({ success: false, message: "Not authorized to cancel this booking" });
         }
-
-        // Rule: Cannot cancel an already accepted, rejected, or cancelled booking
         if (booking.status && booking.status !== "Pending") {
-            return res.status(400).send({
-                success: false,
-                message: `Cannot cancel a ${booking.status} booking`,
-            });
+            return res.status(400).send({ success: false, message: `Cannot cancel a ${booking.status} booking` });
         }
-
-        await bookingsrequest.updateOne(
-            { _id: new ObjectId(id) },
-            { $set: { status: "Cancelled" } }
-        );
-
-        res.send({
-            success: true,
-            message: "Booking cancelled successfully",
-        });
+        await bookingsrequest.updateOne({ _id: new ObjectId(id) }, { $set: { status: "Cancelled" } });
+        res.send({ success: true, message: "Booking cancelled successfully" });
     } catch (error) {
         console.error("Cancel Booking Error:", error);
-        res.status(500).send({
-            success: false,
-            message: "Failed to cancel booking",
-        });
+        res.status(500).send({ success: false, message: "Failed to cancel booking" });
     }
 });
 
+app.patch('/add-service/:id/approve', async (req, res) => {
+    try {
+        const _id = req.params.id;
+        const { status } = req.body;
+        const query = { _id: new ObjectId(_id) };
+        const update = { $set: { status: status } };
+        const result = await services.updateOne(query, update);
+
+        if (result.matchedCount === 0) {
+            return res.status(404).send({ success: false, message: "Service not found" });
+        }
+
+        res.send({ success: true, message: `Service ${status.toLowerCase()} successfully` });
+    } catch (error) {
+        console.error("Approve/Reject Service Error:", error);
+        res.status(500).send({ success: false, message: "Failed to update service status" });
+    }
+});
+
+// Block/Unblock user
+app.patch('/users/:id/block', async (req, res) => {
+    try {
+        const _id = req.params.id;
+        const { isBlocked } = req.body;
+        const query = { _id: new ObjectId(_id) };
+        const update = { $set: { isBlocked: isBlocked === true, blockedAt: isBlocked ? new Date() : null } };
+        const result = await users.updateOne(query, update);
+
+        if (result.matchedCount === 0) {
+            return res.status(404).send({ success: false, message: "User not found" });
+        }
+
+        res.send({ success: true, message: `User ${isBlocked ? "blocked" : "unblocked"} successfully` });
+    } catch (error) {
+        console.error("Block User Error:", error);
+        res.status(500).send({ success: false, message: "Failed to update user status" });
+    }
+});
+
+app.post("/upload-profile-image", upload.single("profileImage"), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).send({
+                message: "No image selected"
+            });
+        }
+
+        if (!process.env.NEXT_PUBLIC_IMGBB_API_KEY) {
+            return res.status(500).send({
+                message: "ImgBB API key is missing"
+            });
+        }
+
+        const formData = new FormData();
+
+        formData.append(
+            "image",
+            new Blob([req.file.buffer], {
+                type: req.file.mimetype
+            }),
+            req.file.originalname
+        );
+
+        const response = await fetch(
+            `https://api.imgbb.com/1/upload?key=${process.env.NEXT_PUBLIC_IMGBB_API_KEY}`,
+            {
+                method: "POST",
+                body: formData
+            }
+        );
+
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+            console.log("ImgBB Error:", result.error);
+
+            return res.status(500).send({
+                message: result.error?.message || "ImgBB upload failed"
+            });
+        }
+
+        res.send({
+            success: true,
+            imageUrl: result.data.url
+        });
+
+    } catch (error) {
+        console.error("Profile image upload error:", error);
+
+        res.status(500).send({
+            message: "Server image upload error"
+        });
+    }
+});
 
 app.listen(port, () => {
     console.log(`server is running on port ${port}`);
