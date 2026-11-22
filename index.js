@@ -29,6 +29,7 @@ const connectedClient = await connectToMongoDB()
 const database = connectedClient.db('wedplan');
 const users = database.collection("user");
 const services = database.collection("services");
+const bookingsrequest = database.collection("bookingsrequest");
 
 app.get('/', (req, res) => {
     res.send('wedplan webpage');
@@ -158,6 +159,14 @@ app.delete('/add-service/:id', async (req, res) => {
     const _id = req.params.id;
     const query = { _id: new ObjectId(_id) };
     const result = await services.deleteOne(query);
+    res.send(result)
+})
+//booking related api
+app.post('/bookingsrequest', async (req, res) => {
+    const bookingsrequests = req.body;
+    console.log(bookingsrequests);
+
+    const result = await bookingsrequest.insertOne(bookingsrequests);
     res.send(result)
 })
 
