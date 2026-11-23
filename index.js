@@ -3,6 +3,9 @@ import cors from 'cors';
 import { MongoClient, ObjectId } from 'mongodb';
 import 'dotenv/config'
 import multer from 'multer';
+import Stripe from 'stripe';
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
 const port = process.env.PORT || 8000;
@@ -27,6 +30,7 @@ const database = connectedClient.db('wedplan');
 const users = database.collection("user");
 const services = database.collection("services");
 const bookingsrequest = database.collection("bookingsrequest");
+const payments = database.collection("payments");
 
 app.get('/', (req, res) => {
     res.send('wedplan webpage');
@@ -132,11 +136,11 @@ app.get('/bookingsrequest', async (req, res) => {
 })
 app.get('/bookingsrequest/count', async (req, res) => {
     const query = {};
-    if(req.query.bookingId) {
-    const result = await bookingsrequest.countDocuments(query);
-    res.send({count: result});
+    if (req.query.bookingId) {
+        const result = await bookingsrequest.countDocuments(query);
+        res.send({ count: result });
     }
-  
+
 })
 
 app.post('/bookingsrequest', async (req, res) => {
@@ -334,6 +338,60 @@ app.post("/upload-profile-image", upload.single("profileImage"), async (req, res
         });
     }
 });
+//payment related api 
+app.post('/payments/checkout-verify', async (req, res) => {
+    try {
+        const { session_id } = req.body;
+
+        if (!session_id) {
+            return res.status(400).send({ success: false, message: "session_id is required" });
+        }
+
+        const session = await stripe.checkout.sessions.retrieve(session_id);
+
+        if (session.status === 'complete' && session.payment_status === 'paid') {
+            const sessionQuery = { sessionId: session_id };
+            const existingPayment = await payments.findOne(sessionQuery);
+
+            if (existingPayment) {
+                return res.send({ success: false, message: "Payment already verified"});
+            }
+            const payment = {
+                sessionId: session_id,
+                status: session.status,
+                payment_status: session.payment_status,
+                customer_email: session.customer_email,
+                userId: session.metadata?.userId,
+                payment_date: new Date(),
+                payment_intent: session.payment_intent,
+            }
+            const result = await payments.insertOne(payment);
+
+            //update the user table
+            if (session.metadata?.userId && ObjectId.isValid(session.metadata.userId)) {
+                const query = { _id: new ObjectId(session.metadata.userId) };
+
+                const updatedDoc = {
+                    $set: {
+                        premium: true,
+                    }
+                };
+                const updateResult = await users.updateOne(
+                    query,
+                    updatedDoc
+                );
+                return res.send({ success: true, result, updateResult, message: "Payment verified and user updated successfully" });
+            }
+
+            return res.send({ success: true, result, message: "Payment recorded successfully" });
+        }
+
+        res.send({ success: false, message: "Payment verification failed" });
+    } catch (error) {
+        console.error("Checkout Verify Error:", error);
+        res.status(500).send({ success: false, message: "Payment verification failed", error: error.message });
+    }
+})
 
 app.listen(port, () => {
     console.log(`server is running on port ${port}`);
