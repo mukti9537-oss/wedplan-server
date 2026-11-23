@@ -41,6 +41,12 @@ app.get('/users', async (req, res) => {
     const result = await cursor.toArray();
     res.send(result);
 })
+app.get('/users/:id/premium', async (req, res) => {
+    const _id = req.params.id;
+    const query = { _id: new ObjectId(_id) };
+    const result = await users.findOne(query, { projection: { premium: 1 } });
+    res.send(result);
+});
 
 app.get('/add-service', async (req, res) => {
     const { search, category, location } = req.query;
