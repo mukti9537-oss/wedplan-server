@@ -16,6 +16,11 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const client = new MongoClient(`mongodb://${process.env.DB_USER}:${process.env.DB_PASSWORD}@ac-sed4pgj-shard-00-00.la1zoji.mongodb.net:27017,ac-sed4pgj-shard-00-01.la1zoji.mongodb.net:27017,ac-sed4pgj-shard-00-02.la1zoji.mongodb.net:27017/?ssl=true&replicaSet=atlas-sjdwaf-shard-0&authSource=admin`);
 
+const myLogger = (req, res , next) => {
+    console.log('headers on the server', req.url, req.query);
+    next();
+}
+
 export async function connectToMongoDB() {
     try {
         await client.connect();
@@ -35,6 +40,19 @@ const payments = database.collection("payments");
 app.get('/', (req, res) => {
     res.send('wedplan webpage');
 });
+const verifyToken = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        res.send({ status: 401, message: "UNAuthorization" });
+        return;
+    }
+    const token = authHeader.split(' ')[1];
+    if(!token){
+        res.send({ status: 401, message: "UNAuthorization" });
+        return;
+    }
+   
+}
 
 app.get('/users', async (req, res) => {
     const cursor = users.find({});
@@ -135,7 +153,8 @@ app.patch('/add-service/:id', async (req, res) => {
     }
 });
 
-app.get('/bookingsrequest', async (req, res) => {
+app.get('/bookingsrequest',verifyToken, async (req, res) => {
+  
     const cursor = bookingsrequest.find({});
     const result = await cursor.toArray();
     res.send(result);
