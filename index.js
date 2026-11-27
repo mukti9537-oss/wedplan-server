@@ -271,20 +271,20 @@ const verifyToken = async (req, res, next) => {
 // Role based middleware -> 403 when the authenticated user's role is not allowed
 const requireRole =
     (...allowedRoles) =>
-    (req, res, next) => {
-        if (!req.user) {
-            return res.status(401).send({ success: false, message: 'Unauthorized' });
-        }
-        if (!allowedRoles.includes(req.user.role)) {
-            return res
-                .status(403)
-                .send({
-                    success: false,
-                    message: 'Forbidden: you do not have permission to perform this action',
-                });
-        }
-        next();
-    };
+        (req, res, next) => {
+            if (!req.user) {
+                return res.status(401).send({ success: false, message: 'Unauthorized' });
+            }
+            if (!allowedRoles.includes(req.user.role)) {
+                return res
+                    .status(403)
+                    .send({
+                        success: false,
+                        message: 'Forbidden: you do not have permission to perform this action',
+                    });
+            }
+            next();
+        };
 
 // Ownership helper -> returns true when the resource belongs to the user (or user is admin)
 const ownsResource = (req, ownerEmail) => {
@@ -970,14 +970,26 @@ app.get('/vendor-bookings/:vendorEmail', verifyToken, async (req, res) => {
             bookingId: { $in: serviceIds },
         });
 
-        // Free vendor limit: maximum 3 booking requests
-        if (req.user.role === 'vendor' && !req.user.premium && bookingCount > 3) {
-            return res.status(403).send({
-                success: false,
-                upgradeRequired: true,
-                bookingCount,
-                message: 'You have received more than 3 booking requests. Upgrade to Premium to manage all requests.',
+        // Free plan: maximum 3 services
+        const currentUser = await users.findOne(
+            { email: vendorEmail },
+            { projection: { premium: 1 } }
+        );
+
+        const isPremium = currentUser?.premium === true;
+
+        if (!isPremium) {
+            const serviceCount = await services.countDocuments({
+                vendorEmail: vendorEmail,
             });
+
+            if (serviceCount >= 3) {
+                return res.status(403).send({
+                    success: false,
+                    upgradeRequired: true,
+                    message: 'Free plan allows only 3 services. Upgrade to Premium.',
+                });
+            }
         }
 
         // Fetch vendor bookings
