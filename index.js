@@ -928,60 +928,81 @@ app.post('/bookingsrequest', verifyToken, requireRole('customer'), async (req, r
     }
 });
 
-// Bookings for a vendor's services (vendor can only read their own)
+// Bookings for a vendor's services
 app.get('/vendor-bookings/:vendorEmail', verifyToken, async (req, res) => {
     try {
         const { vendorEmail } = req.params;
 
-        // Vendors may only fetch their own bookings; admins may fetch any
+        // Vendors can only access their own bookings
         if (req.user.role !== 'admin') {
             if (req.user.role !== 'vendor') {
-                return res
-                    .status(403)
-                    .send({ success: false, message: 'Forbidden: vendors only' });
+                return res.status(403).send({
+                    success: false,
+                    message: 'Forbidden: vendors only',
+                });
             }
+
             if (
-                String(vendorEmail).toLowerCase() !== String(req.user.email).toLowerCase()
+                String(vendorEmail).toLowerCase() !==
+                String(req.user.email).toLowerCase()
             ) {
-                return res
-                    .status(403)
-                    .send({ success: false, message: 'Forbidden: you can only view your own booking requests' });
+                return res.status(403).send({
+                    success: false,
+                    message: 'You can only view your own booking requests',
+                });
             }
         }
 
+        // Find vendor's services
+        const vendorServices = await services
+            .find(
+                { vendorEmail },
+                { projection: { _id: 1 } }
+            )
+            .toArray();
+
+        const serviceIds = vendorServices.map(service =>
+            String(service._id)
+        );
+
+        // Count booking requests received by this vendor
+        const bookingCount = await bookingsrequest.countDocuments({
+            bookingId: { $in: serviceIds },
+        });
+
+        // Free vendor limit: maximum 3 booking requests
+        if (req.user.role === 'vendor' && !req.user.premium && bookingCount > 3) {
+            return res.status(403).send({
+                success: false,
+                upgradeRequired: true,
+                bookingCount,
+                message: 'You have received more than 3 booking requests. Upgrade to Premium to manage all requests.',
+            });
+        }
+
+        // Fetch vendor bookings
         const requests = await bookingsrequest
-            .find({})
+            .find({ bookingId: { $in: serviceIds } })
             .sort({ requestDate: -1 })
             .toArray();
 
-        const vendorBookings = [];
-
-        for (const booking of requests) {
-            if (!ObjectId.isValid(booking.bookingId)) continue;
-
-            const service = await services.findOne({
-                _id: new ObjectId(booking.bookingId),
-                vendorEmail: vendorEmail,
-            });
-
-            if (!service) continue;
-
-            vendorBookings.push({
-                ...booking,
-                customerName: booking.customerName || 'Customer',
-                serviceName: service.serviceName,
-                serviceImage: service.serviceImage,
-                vendorName: service.vendorName,
-                eventDate: booking.BookingDate,
-                eventLocation: booking.BookingLocation,
-                status: booking.status || 'Pending',
-            });
-        }
+        const vendorBookings = requests.map(booking => ({
+            ...booking,
+            customerName: booking.customerName || 'Customer',
+            eventDate: booking.BookingDate,
+            eventLocation: booking.BookingLocation,
+            status: booking.status || 'Pending',
+        }));
 
         res.send(vendorBookings);
+
     } catch (error) {
-        console.error(error);
-        res.status(500).send({ success: false, message: 'Failed to fetch bookings' });
+        console.error('Fetch Vendor Bookings Error:', error);
+
+        res.status(500).send({
+            success: false,
+            message: 'Failed to fetch bookings',
+        });
     }
 });
 
