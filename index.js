@@ -293,6 +293,31 @@ const ownsResource = (req, ownerEmail) => {
     return String(ownerEmail).toLowerCase() === String(req.user.email).toLowerCase();
 };
 
+// Free plan limitation: max 3 active services.
+// Applies to adding a service AND to switching a service back ON (otherwise a
+// free vendor could toggle their 3 services off, add more, then toggle on again).
+// Returns null when the action is allowed, otherwise a 403 error payload.
+const freePlanReactivationBlocked = async (req, vendorEmail, excludeId) => {
+    if (req.user.premium || req.user.role === 'admin') return null;
+
+    const activeCount = await services.countDocuments({
+        vendorEmail,
+        isAvailable: true,
+        status: { $in: ['Approved', 'Pending'] },
+        ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+    });
+
+    if (activeCount >= 3) {
+        return {
+            success: false,
+            upgradeRequired: true,
+            message:
+                'Free plan allows a maximum of 3 active services. Upgrade to Premium for unlimited services.',
+        };
+    }
+    return null;
+};
+
 // ---------------------------------------------------------------------------
 // Auth: exchange a Better Auth session token for a JWT
 // ---------------------------------------------------------------------------
@@ -554,6 +579,7 @@ app.post(
                 if (activeCount >= 3) {
                     return res.status(403).send({
                         success: false,
+                        upgradeRequired: true,
                         message:
                             'Free plan allows a maximum of 3 active services. Upgrade to Premium for unlimited services.',
                     });
@@ -630,6 +656,18 @@ app.patch('/add-service/:id', verifyToken, async (req, res) => {
 
         // Availability toggle (also exposed at /services/:id/availability)
         if (typeof body.isAvailable === 'boolean' && Object.keys(body).length === 1) {
+            // Switching a service back ON counts toward the free plan's 3-active limit
+            if (body.isAvailable === true && service.isAvailable !== true) {
+                const blocked = await freePlanReactivationBlocked(
+                    req,
+                    service.vendorEmail || req.user.email,
+                    service._id
+                );
+                if (blocked) {
+                    return res.status(403).send(blocked);
+                }
+            }
+
             const result = await services.updateOne(
                 { _id: new ObjectId(_id) },
                 { $set: { isAvailable: body.isAvailable } }
@@ -677,6 +715,18 @@ app.patch('/add-service/:id', verifyToken, async (req, res) => {
         }
         if (body.isAvailable !== undefined) {
             updateFields.isAvailable = body.isAvailable === true;
+
+            // Switching a service back ON counts toward the free plan's 3-active limit
+            if (updateFields.isAvailable === true && service.isAvailable !== true) {
+                const blocked = await freePlanReactivationBlocked(
+                    req,
+                    service.vendorEmail || req.user.email,
+                    service._id
+                );
+                if (blocked) {
+                    return res.status(403).send(blocked);
+                }
+            }
         }
 
         if (Object.keys(updateFields).length === 0) {
@@ -724,6 +774,18 @@ app.patch('/services/:id/availability', verifyToken, async (req, res) => {
             return res
                 .status(400)
                 .send({ success: false, message: 'isAvailable must be a boolean value' });
+        }
+
+        // Switching a service back ON counts toward the free plan's 3-active limit
+        if (isAvailable === true && service.isAvailable !== true) {
+            const blocked = await freePlanReactivationBlocked(
+                req,
+                service.vendorEmail || req.user.email,
+                service._id
+            );
+            if (blocked) {
+                return res.status(403).send(blocked);
+            }
         }
 
         const result = await services.updateOne(
@@ -969,28 +1031,6 @@ app.get('/vendor-bookings/:vendorEmail', verifyToken, async (req, res) => {
         const bookingCount = await bookingsrequest.countDocuments({
             bookingId: { $in: serviceIds },
         });
-
-        // Free plan: maximum 3 services
-        const currentUser = await users.findOne(
-            { email: vendorEmail },
-            { projection: { premium: 1 } }
-        );
-
-        const isPremium = currentUser?.premium === true;
-
-        if (!isPremium) {
-            const serviceCount = await services.countDocuments({
-                vendorEmail: vendorEmail,
-            });
-
-            if (serviceCount >= 3) {
-                return res.status(403).send({
-                    success: false,
-                    upgradeRequired: true,
-                    message: 'Free plan allows only 3 services. Upgrade to Premium.',
-                });
-            }
-        }
 
         // Fetch vendor bookings
         const requests = await bookingsrequest
